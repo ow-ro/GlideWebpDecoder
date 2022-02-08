@@ -21,7 +21,6 @@ android {
         consumerProguardFiles "proguard-rules.pro"
 
         ndk {
-            //abiFilter "armeabi"
             abiFilter "armeabi-v7a"
             abiFilter "arm64-v8a"
             abiFilter "x86"
