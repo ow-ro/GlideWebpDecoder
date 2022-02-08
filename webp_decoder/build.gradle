@@ -45,5 +45,3 @@ android {
         targetCompatibility JavaVersion.VERSION_1_7
     }
 }
-
-apply from: "${rootProject.projectDir}/release-bintray.gradle"

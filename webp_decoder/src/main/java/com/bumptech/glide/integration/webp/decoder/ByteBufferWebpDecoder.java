@@ -7,6 +7,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.bumptech.glide.Glide;
+import com.bumptech.glide.load.DecodeFormat;
 import com.bumptech.glide.load.Option;
 import com.bumptech.glide.load.Options;
 import com.bumptech.glide.load.ResourceDecoder;
@@ -18,6 +19,9 @@ import com.bumptech.glide.load.resource.UnitTransformation;
 import com.bumptech.glide.load.resource.gif.GifBitmapProvider;
 import com.bumptech.glide.integration.webp.WebpHeaderParser;
 import com.bumptech.glide.integration.webp.WebpImage;
+import com.bumptech.glide.load.resource.gif.GifOptions;
+
+import static com.bumptech.glide.integration.webp.decoder.WebpDecoder.DEFAULT_MAX_FRAME_BITMAP_CACHE_SIZE;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -67,9 +71,15 @@ public class ByteBufferWebpDecoder implements ResourceDecoder<ByteBuffer, WebpDr
 
         WebpImage webp = WebpImage.create(data);
 
+        Bitmap.Config config =
+                options.get(GifOptions.DECODE_FORMAT) == DecodeFormat.PREFER_RGB_565
+                        ? Bitmap.Config.RGB_565
+                        : Bitmap.Config.ARGB_8888;
+
         int sampleSize = Utils.getSampleSize(webp.getWidth(), webp.getHeight(), width, height);
         WebpFrameCacheStrategy cacheStrategy = options.get(WebpFrameLoader.FRAME_CACHE_STRATEGY);
-        WebpDecoder webpDecoder = new WebpDecoder(mProvider, webp, source, sampleSize, cacheStrategy);
+        WebpDecoder webpDecoder = new WebpDecoder(mProvider, webp, source, sampleSize, cacheStrategy, DEFAULT_MAX_FRAME_BITMAP_CACHE_SIZE);
+        webpDecoder.setDefaultBitmapConfig(config);
         webpDecoder.advance();
         Bitmap firstFrame = webpDecoder.getNextFrame();
         if (firstFrame == null) {

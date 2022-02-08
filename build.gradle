@@ -42,11 +42,6 @@ subprojects { project ->
         toolVersion = '6.12.1'
     }
 
-    checkstyle {
-        configFile = rootProject.file('checkstyle.xml')
-        configProperties.checkStyleConfigDir = rootProject.rootDir
-    }
-
     task checkstyle(type: Checkstyle) {
         source 'src'
         include '**/*.java'
@@ -67,11 +62,6 @@ subprojects { project ->
             options.compilerArgs << '-Xlint:unchecked' << '-Xlint:deprecation'
         }
     }
-}
-
-task wrapper(type: Wrapper) {
-    gradleVersion = '4.1'
-    distributionType = Wrapper.DistributionType.ALL
 }
 
 ext {

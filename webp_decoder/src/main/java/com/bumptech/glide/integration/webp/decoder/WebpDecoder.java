@@ -11,6 +11,8 @@ import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.LruCache;
 
+import androidx.annotation.NonNull;
+
 import com.bumptech.glide.gifdecoder.GifDecoder;
 import com.bumptech.glide.gifdecoder.GifHeader;
 import com.bumptech.glide.integration.webp.WebpFrame;
@@ -30,7 +32,7 @@ import java.nio.ByteBuffer;
 public class WebpDecoder implements GifDecoder {
     private static final String TAG = "WebpDecoder";
     // 缓存最近的Bitmap帧用于渲染当前帧
-    private static final int MAX_FRAME_BITMAP_CACHE_SIZE = 5;
+    public static final int DEFAULT_MAX_FRAME_BITMAP_CACHE_SIZE = 5;
 
     /** Raw WebP data from input source. */
     private ByteBuffer rawData;
@@ -44,6 +46,7 @@ public class WebpDecoder implements GifDecoder {
     private int downsampledHeight;
     private int downsampledWidth;
     private final Paint mTransparentFillPaint;
+    private int mBitmapCacheSize;
 
     private WebpFrameCacheStrategy mCacheStrategy;
 
@@ -53,11 +56,11 @@ public class WebpDecoder implements GifDecoder {
 
     public WebpDecoder(GifDecoder.BitmapProvider provider, WebpImage webPImage, ByteBuffer rawData,
                        int sampleSize) {
-        this(provider, webPImage, rawData, sampleSize, WebpFrameCacheStrategy.NONE);
+        this(provider, webPImage, rawData, sampleSize, WebpFrameCacheStrategy.NONE, DEFAULT_MAX_FRAME_BITMAP_CACHE_SIZE);
     }
 
     public WebpDecoder(GifDecoder.BitmapProvider provider, WebpImage webPImage, ByteBuffer rawData,
-                       int sampleSize, WebpFrameCacheStrategy cacheStrategy) {
+                       int sampleSize, WebpFrameCacheStrategy cacheStrategy, int bitmapCacheSize) {
         mBitmapProvider = provider;
         mWebPImage = webPImage;
         mFrameDurations = webPImage.getFrameDurations();
@@ -75,21 +78,25 @@ public class WebpDecoder implements GifDecoder {
         mTransparentFillPaint.setStyle(Paint.Style.FILL);
         mTransparentFillPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC));
 
-        int maxCacheSize = MAX_FRAME_BITMAP_CACHE_SIZE;
         if (mCacheStrategy.cacheAll()) {
-            maxCacheSize = webPImage.getFrameCount();
+            mBitmapCacheSize = webPImage.getFrameCount();
         } else {
-            maxCacheSize = Math.max(maxCacheSize, mCacheStrategy.getCacheSize());
+            mBitmapCacheSize = Math.max(bitmapCacheSize, mCacheStrategy.getCacheSize());
         }
-        mFrameBitmapCache = new LruCache<Integer, Bitmap>(maxCacheSize) {
-            @Override
-            protected void entryRemoved(boolean evicted, Integer key, Bitmap oldValue, Bitmap newValue) {
-                // Return the cached frame bitmap to the provider
-                if (oldValue != null) {
-                    mBitmapProvider.release(oldValue);
+
+        if (mBitmapCacheSize > 0) {
+            mFrameBitmapCache = new LruCache<Integer, Bitmap>(mBitmapCacheSize) {
+                @Override
+                protected void entryRemoved(boolean evicted, Integer key, Bitmap oldValue, Bitmap newValue) {
+                    // Return the cached frame bitmap to the provider
+                    if (oldValue != null) {
+                        mBitmapProvider.release(oldValue);
+                    }
                 }
-            }
-        };
+            };
+        } else {
+            mFrameBitmapCache = null;
+        }
 
         setData(new GifHeader(), rawData, sampleSize);
     }
@@ -181,12 +188,7 @@ public class WebpDecoder implements GifDecoder {
     }
 
     /** @Override Added in Glide 4.4.0 */
-    public void setDefaultBitmapConfig(Bitmap.Config config) {
-        if (config != Bitmap.Config.ARGB_8888) {
-            throw new IllegalArgumentException("Unsupported format: " + config
-                    + ", must be one of " + Bitmap.Config.ARGB_8888);
-        }
-
+    public void setDefaultBitmapConfig(@NonNull Bitmap.Config config) {
         mBitmapConfig = config;
     }
 
@@ -194,7 +196,7 @@ public class WebpDecoder implements GifDecoder {
     public Bitmap getNextFrame() {
         int frameNumber = getCurrentFrameIndex();
         // Get the target Bitmap for Canvas
-        Bitmap bitmap = mBitmapProvider.obtain(downsampledWidth, downsampledHeight, Bitmap.Config.ARGB_8888);
+        Bitmap bitmap = mBitmapProvider.obtain(downsampledWidth, downsampledHeight, mBitmapConfig);
         bitmap.eraseColor(Color.TRANSPARENT);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             bitmap.setDensity(DisplayMetrics.DENSITY_DEVICE_STABLE);
@@ -202,7 +204,7 @@ public class WebpDecoder implements GifDecoder {
         Canvas canvas = new Canvas(bitmap);
         canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC);
 
-        if (!mCacheStrategy.noCache()) {
+        if (!mCacheStrategy.noCache() && mFrameBitmapCache != null) {
             Bitmap cache = mFrameBitmapCache.get(frameNumber);
             if (cache != null) {
                 // hit from memory cache
@@ -260,7 +262,9 @@ public class WebpDecoder implements GifDecoder {
                     + ", dispose=" + frameInfo.disposeBackgroundColor);
         }
         // Then put the rendered frame into the BitmapCache
-        cacheFrameBitmap(frameNumber, bitmap);
+        if (!mCacheStrategy.noCache() && mFrameBitmapCache != null) {
+            cacheFrameBitmap(frameNumber, bitmap);
+        }
 
         return bitmap;
     }
@@ -279,7 +283,7 @@ public class WebpDecoder implements GifDecoder {
 
         WebpFrame webpFrame = mWebPImage.getFrame(frameNumber);
         try {
-            Bitmap frameBitmap = mBitmapProvider.obtain(frameWidth, frameHeight, mBitmapConfig);
+            Bitmap frameBitmap = mBitmapProvider.obtain(frameWidth, frameHeight, Bitmap.Config.ARGB_8888);
             frameBitmap.eraseColor(Color.TRANSPARENT);
             frameBitmap.setDensity(canvas.getDensity());
             webpFrame.renderFrame(frameWidth, frameHeight, frameBitmap);
@@ -317,7 +321,9 @@ public class WebpDecoder implements GifDecoder {
     public void clear() {
         mWebPImage.dispose();
         mWebPImage = null;
-        mFrameBitmapCache.evictAll();
+        if (mFrameBitmapCache != null) {
+            mFrameBitmapCache.evictAll();
+        }
         rawData = null;
     }
 
@@ -359,7 +365,7 @@ public class WebpDecoder implements GifDecoder {
             WebpFrameInfo frameInfo = mFrameInfos[index];
             if (!frameInfo.disposeBackgroundColor || !isFullFrame(frameInfo)) {
                 // need to draw this frame
-                Bitmap bitmap = mFrameBitmapCache.get(index);
+                Bitmap bitmap = (mFrameBitmapCache != null ? mFrameBitmapCache.get(index) : null);
                 if (bitmap != null && !bitmap.isRecycled()) {
                     bitmap.setDensity(canvas.getDensity());
                     canvas.drawBitmap(bitmap, 0, 0, null);
